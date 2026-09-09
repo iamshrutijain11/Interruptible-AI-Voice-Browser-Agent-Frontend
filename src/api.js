@@ -7,7 +7,11 @@
  * one-time snapshot.
  */
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://interruptible-ai-voice-browser-agent.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || (
+  typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:8000'
+    : 'https://interruptible-ai-voice-browser-agent.onrender.com'
+)
 
 export async function sendAudioCommand(audioBlob) {
   const form = new FormData()

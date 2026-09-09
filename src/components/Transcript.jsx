@@ -1,6 +1,25 @@
 import React from 'react'
 
-export default function Transcript({ userText, agentText, interrupted }) {
+// ISO 639-1 -> display label for the language badge
+const LANG_LABELS = {
+  en: 'EN', es: 'ES', hi: 'हि', fr: 'FR', de: 'DE',
+  ja: '日本語', pt: 'PT', ar: 'AR', it: 'IT',
+}
+
+function LanguageBadge({ lang }) {
+  if (!lang || lang === 'en' || lang === 'und' || lang === '') return null
+  const label = LANG_LABELS[lang] || lang.toUpperCase()
+  return (
+    <span
+      title={`Detected language: ${lang}`}
+      className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-400 tracking-wide select-none"
+    >
+      🌐 {label}
+    </span>
+  )
+}
+
+export default function Transcript({ userText, agentText, interrupted, detectedLanguage }) {
   const hasUser = Boolean(userText)
   const hasAgent = Boolean(agentText)
 
@@ -15,6 +34,8 @@ export default function Transcript({ userText, agentText, interrupted }) {
           <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
             You said
           </span>
+          {/* Language badge — only shown for non-English detected languages */}
+          <LanguageBadge lang={detectedLanguage} />
         </div>
         <p className={`text-sm sm:text-base ${hasUser ? 'text-gray-100 font-medium' : 'text-gray-600 italic'}`}>
           {userText || 'Nothing yet — tap the microphone or type below to begin.'}

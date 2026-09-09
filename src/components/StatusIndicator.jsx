@@ -17,13 +17,37 @@ const STATE_META = {
     label: 'Thinking',
     dot: 'bg-amber-400 animate-pulse',
     badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-    hint: 'Parsing search constraints',
+    hint: 'Parsing intent & constraints',
+  },
+  PLANNING: {
+    label: 'Planning',
+    dot: 'bg-violet-400 animate-pulse',
+    badge: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+    hint: 'Building search strategy',
   },
   BROWSING: {
     label: 'Browsing',
     dot: 'bg-teal-400 animate-pulse',
     badge: 'bg-teal-500/15 text-teal-300 border-teal-500/30',
     hint: 'Automating browser search',
+  },
+  ANALYZING: {
+    label: 'Analyzing',
+    dot: 'bg-blue-400 animate-pulse',
+    badge: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+    hint: 'Comparing & scoring products',
+  },
+  RECOMMENDING: {
+    label: 'Recommending',
+    dot: 'bg-amber-400 animate-pulse',
+    badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    hint: 'Explaining recommendation',
+  },
+  AWAITING_APPROVAL: {
+    label: 'Awaiting Approval',
+    dot: 'bg-sky-400 animate-ping',
+    badge: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+    hint: 'Waiting for your approve / reject',
   },
   SPEAKING: {
     label: 'Speaking',
@@ -35,7 +59,7 @@ const STATE_META = {
     label: 'Interrupted',
     dot: 'bg-coral-400',
     badge: 'bg-coral-500/20 text-coral-300 border-coral-500/40',
-    hint: 'Task superseded by new command',
+    hint: 'Task superseded — re-planning',
   },
   COMPLETED: {
     label: 'Completed',

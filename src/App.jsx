@@ -6,18 +6,31 @@ import StatusIndicator from './components/StatusIndicator'
 import Transcript from './components/Transcript'
 import Results from './components/Results'
 import TaskTimeline from './components/TaskTimeline'
+import PlanPanel from './components/PlanPanel'
+import RecommendationPanel from './components/RecommendationPanel'
+import ActivityPanel from './components/ActivityPanel'
 
 export default function App() {
-  const [connected, setConnected] = useState(false)
-  const [state, setState] = useState('IDLE')
-  const [taskId, setTaskId] = useState(null)
-  const [userText, setUserText] = useState('')
-  const [agentText, setAgentText] = useState('')
-  const [results, setResults] = useState([])
-  const [timeline, setTimeline] = useState([])
-  const [justInterrupted, setJustInterrupted] = useState(false)
-  const [errorMsg, setErrorMsg] = useState(null)
-  const [typedText, setTypedText] = useState('')
+  const [connected, setConnected]               = useState(false)
+  const [state, setState]                       = useState('IDLE')
+  const [taskId, setTaskId]                     = useState(null)
+  const [userText, setUserText]                 = useState('')
+  const [agentText, setAgentText]               = useState('')
+  const [results, setResults]                   = useState([])
+  const [timeline, setTimeline]                 = useState([])
+  const [justInterrupted, setJustInterrupted]   = useState(false)
+  const [errorMsg, setErrorMsg]                 = useState(null)
+  const [typedText, setTypedText]               = useState('')
+  const [activeRange, setActiveRange]           = useState(null)
+  const [detectedLanguage, setDetectedLanguage] = useState('')
+  // Plan panel state
+  const [plan, setPlan]                         = useState([])
+  const [isReplan, setIsReplan]                 = useState(false)
+  // Recommendation state
+  const [recommendation, setRecommendation]     = useState(null)
+  const [awaitingApproval, setAwaitingApproval] = useState(false)
+  // Metrics & activity panel state
+  const [metrics, setMetrics]                   = useState(null)
 
   const socketRef = useRef(null)
 
@@ -25,27 +38,70 @@ export default function App() {
     const socket = new VoiceSocket()
     socketRef.current = socket
 
-    socket.on('_connected', () => setConnected(true))
+    socket.on('_connected',    () => setConnected(true))
     socket.on('_disconnected', () => setConnected(false))
 
-    socket.on('transcript.updated', (ev) => setUserText(ev.text))
+    socket.on('metrics.updated', (ev) => {
+      if (ev.metrics) setMetrics(ev.metrics)
+    })
+
+    socket.on('transcript.updated', (ev) => {
+      setUserText(ev.text)
+      if (ev.language) setDetectedLanguage(ev.language)
+    })
 
     socket.on('task.started', (ev) => {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel()
-      }
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel()
       setTaskId(ev.task_id)
       setResults([])
+      setRecommendation(null)
+      setAwaitingApproval(false)
       setErrorMsg(null)
       setJustInterrupted(false)
+      if (ev.constraints && (ev.constraints.min_price != null || ev.constraints.max_price != null)) {
+        setActiveRange({ min: ev.constraints.min_price, max: ev.constraints.max_price })
+      } else {
+        setActiveRange(null)
+      }
+      setTimeline((t) => [...t, ev])
+    })
+
+    // Plan events
+    socket.on('plan.created', (ev) => {
+      setPlan(ev.steps || [])
+      setIsReplan(ev.is_replan || false)
+    })
+
+    socket.on('step.changed', (ev) => {
+      setPlan((prev) =>
+        prev.map((s) =>
+          s.id === ev.step_id
+            ? { ...s, status: ev.status, detail: ev.detail ?? s.detail }
+            : s
+        )
+      )
+    })
+
+    // Recommendation + approval events
+    socket.on('recommendation.ready', (ev) => {
+      setRecommendation(ev.recommendation)
+    })
+
+    socket.on('approval.required', (ev) => {
+      setAwaitingApproval(true)
+      // Also update agent text to the recommendation prompt
+      if (ev.text) setAgentText(ev.text)
+    })
+
+    socket.on('approval.done', (ev) => {
+      setAwaitingApproval(false)
       setTimeline((t) => [...t, ev])
     })
 
     socket.on('task.interrupted', (ev) => {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel()
-      }
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel()
       setJustInterrupted(true)
+      setAwaitingApproval(false)
       setTimeline((t) => [...t, ev])
       setTimeout(() => setJustInterrupted(false), 2500)
     })
@@ -79,9 +135,7 @@ export default function App() {
   }, [])
 
   async function handleReset() {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
-    }
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
     await resetTask()
     setState('IDLE')
     setTaskId(null)
@@ -89,8 +143,28 @@ export default function App() {
     setAgentText('')
     setResults([])
     setTimeline([])
+    setPlan([])
+    setIsReplan(false)
+    setRecommendation(null)
+    setAwaitingApproval(false)
     setJustInterrupted(false)
     setErrorMsg(null)
+    setActiveRange(null)
+    setDetectedLanguage('')
+    setMetrics(null)
+  }
+
+  function handleFilterApply(min, max) {
+    let utterance = ''
+    if (min && max)  utterance = `between ${min} and ${max}`
+    else if (max)    utterance = `under ${max}`
+    else if (min)    utterance = `above ${min}`
+    if (utterance)   socketRef.current?.sendUtterance(utterance)
+  }
+
+  function handleFilterClear() {
+    setActiveRange(null)
+    socketRef.current?.sendUtterance('under 1000000')
   }
 
   function handleTypedSubmit(e) {
@@ -98,6 +172,16 @@ export default function App() {
     if (!typedText.trim()) return
     socketRef.current?.sendUtterance(typedText.trim())
     setTypedText('')
+  }
+
+  function handleApprove() {
+    setAwaitingApproval(false)
+    socketRef.current?.ws?.send(JSON.stringify({ action: 'approval', approved: true }))
+  }
+
+  function handleReject() {
+    setAwaitingApproval(false)
+    socketRef.current?.ws?.send(JSON.stringify({ action: 'approval', approved: false }))
   }
 
   return (
@@ -108,7 +192,7 @@ export default function App() {
         <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-base-800/80 pb-6">
           <div>
             <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-teal-500/20 border border-amber-500/30 text-amber-400 shadow-sm">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-violet-500/20 border border-amber-500/30 text-amber-400 shadow-sm">
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
@@ -120,51 +204,38 @@ export default function App() {
               </h1>
             </div>
             <p className="text-sm text-gray-400 mt-1 pl-12">
-              Say what you want, interrupt anytime — fully autonomous browser execution
+              Interruptible · Explainable · Multi-site · Multilingual
             </p>
           </div>
 
-          {/* Connection Status Pill */}
+          {/* Connection Status */}
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            <span
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium backdrop-blur-sm transition-colors duration-300 ${
-                connected
-                  ? 'border-teal-500/30 bg-teal-500/10 text-teal-300'
-                  : 'border-coral-500/30 bg-coral-500/10 text-coral-300'
-              }`}
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  connected
-                    ? 'bg-teal-400 shadow-[0_0_8px_rgba(79,209,197,0.7)]'
-                    : 'bg-coral-400'
-                }`}
-              />
+            <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium backdrop-blur-sm transition-colors duration-300 ${
+              connected
+                ? 'border-teal-500/30 bg-teal-500/10 text-teal-300'
+                : 'border-coral-500/30 bg-coral-500/10 text-coral-300'
+            }`}>
+              <span className={`h-2 w-2 rounded-full ${connected ? 'bg-teal-400 shadow-[0_0_8px_rgba(79,209,197,0.7)]' : 'bg-coral-400'}`} />
               {connected ? 'Live Connected' : 'Disconnected'}
             </span>
           </div>
         </header>
 
-        {/* 2-Zone Layout: Main Interaction (8 cols) + Supporting Side Rail (4 cols) */}
+        {/* 2-Zone Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
-          {/* Primary Zone: Voice Centerpiece, Conversation & Results */}
+          {/* Primary Zone */}
           <main className="lg:col-span-8 space-y-8">
 
-            {/* Visual Centerpiece Hero Card */}
+            {/* Voice Centerpiece Card */}
             <div className="relative overflow-hidden rounded-2xl border border-base-800 bg-gradient-to-b from-base-900/90 via-base-900/50 to-base-950/80 p-6 sm:p-8 backdrop-blur-md shadow-2xl space-y-8">
-              
-              {/* Mic Centerpiece Stage */}
+
               <div className="flex flex-col items-center justify-center pt-2 pb-4">
                 <VoiceButton
                   onRecordingStart={() => setState('LISTENING')}
-                  onRecordingSent={(res) => {
-                    if (res?.transcript) {
-                      setUserText(res.transcript)
-                    }
-                  }}
+                  onRecordingSent={(res) => { if (res?.transcript) setUserText(res.transcript) }}
                   onSpeechText={(text) => {
-                    if (text && text.trim()) {
+                    if (text?.trim()) {
                       setUserText(text.trim())
                       socketRef.current?.sendUtterance(text.trim())
                     }
@@ -173,7 +244,7 @@ export default function App() {
                 />
               </div>
 
-              {/* Typed Alternative Command Bar */}
+              {/* Typed Command Bar */}
               <form onSubmit={handleTypedSubmit} className="flex gap-2">
                 <div className="relative flex-1">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-gray-500">
@@ -198,24 +269,35 @@ export default function App() {
                 </button>
               </form>
 
-              {/* Active Conversation Anchor */}
+              {/* Transcript */}
               <div className="pt-2 border-t border-base-800/80">
                 <Transcript
                   userText={userText}
                   agentText={agentText}
                   interrupted={justInterrupted}
+                  detectedLanguage={detectedLanguage}
                 />
               </div>
             </div>
 
-            {/* Results Grid Section */}
+            {/* Recommendation Panel */}
+            {recommendation && (
+              <RecommendationPanel
+                recommendation={recommendation}
+                awaitingApproval={awaitingApproval}
+                onApprove={handleApprove}
+                onReject={handleReject}
+              />
+            )}
+
+            {/* Results Grid */}
             <section className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <h2 className="text-lg font-semibold tracking-tight text-gray-100">
                     Search Results
                   </h2>
-                  {results && results.length > 0 && (
+                  {results?.length > 0 && (
                     <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-xs font-semibold text-amber-300">
                       {results.length} found
                     </span>
@@ -223,23 +305,28 @@ export default function App() {
                 </div>
               </div>
 
-              <Results results={results} />
+              <Results
+                results={results}
+                activeRange={activeRange}
+                onFilterApply={handleFilterApply}
+                onFilterClear={handleFilterClear}
+              />
             </section>
           </main>
 
-          {/* Supporting Peripheral Side Rail */}
-          <aside className="lg:col-span-4 space-y-6">
+          {/* Side Rail */}
+          <aside className="lg:col-span-4 space-y-4">
 
-            {/* Interrupt Alert Banner */}
+            {/* Interrupt Alert */}
             {justInterrupted && (
               <div className="flex items-start gap-3 rounded-xl border border-coral-500/60 bg-coral-500/10 p-4 text-sm text-coral-300 shadow-lg shadow-coral-500/5 animate-fadeInUp">
                 <svg className="h-5 w-5 text-coral-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                 </svg>
                 <div>
-                  <p className="font-semibold text-coral-300">Interrupted</p>
+                  <p className="font-semibold text-coral-300">Interrupted — Re-planning</p>
                   <p className="text-xs text-coral-400/90 mt-0.5">
-                    Previous task superseded. Starting your new request immediately.
+                    Context preserved. Agent is re-planning from your new instruction.
                   </p>
                 </div>
               </div>
@@ -247,7 +334,7 @@ export default function App() {
 
             {/* Error Banner */}
             {errorMsg && (
-              <div className="flex items-start gap-3 rounded-xl border border-coral-500/60 bg-coral-500/10 p-4 text-sm text-coral-300 shadow-lg shadow-coral-500/5 animate-fadeInUp">
+              <div className="flex items-start gap-3 rounded-xl border border-coral-500/60 bg-coral-500/10 p-4 text-sm text-coral-300 shadow-lg animate-fadeInUp">
                 <svg className="h-5 w-5 text-coral-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="8" x2="12" y2="12" />
@@ -260,10 +347,16 @@ export default function App() {
               </div>
             )}
 
-            {/* Live System State Indicator Card */}
+            {/* Status Indicator */}
             <StatusIndicator state={state} taskId={taskId} />
 
-            {/* Activity Timeline Card */}
+            {/* Real-time Agent Activity & Observability Panel */}
+            <ActivityPanel metrics={metrics} />
+
+            {/* Live Plan Panel */}
+            <PlanPanel plan={plan} isReplan={isReplan} taskId={taskId} />
+
+            {/* Task History Timeline */}
             <div className="rounded-xl border border-base-800 bg-base-900/70 p-5 backdrop-blur-sm space-y-4">
               <div className="flex items-center justify-between border-b border-base-800/80 pb-3">
                 <div className="flex items-center gap-2">
@@ -272,20 +365,19 @@ export default function App() {
                     <polyline points="12 6 12 12 16 14" />
                   </svg>
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                    Task Activity
+                    Task History
                   </h3>
                 </div>
-                {timeline && timeline.length > 0 && (
+                {timeline?.length > 0 && (
                   <span className="font-mono-data text-[11px] text-gray-500">
-                    {timeline.length} {timeline.length === 1 ? 'event' : 'events'}
+                    {timeline.length} events
                   </span>
                 )}
               </div>
-
               <TaskTimeline events={timeline} />
             </div>
 
-            {/* Action Bar / Reset Button */}
+            {/* Reset Button */}
             <button
               onClick={handleReset}
               className="w-full flex items-center justify-center gap-2 rounded-xl border border-base-800 bg-base-900/50 py-3 px-4 text-xs font-medium text-gray-400 hover:border-base-700 hover:bg-base-800 hover:text-gray-200 transition-all cursor-pointer"

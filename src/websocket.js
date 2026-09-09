@@ -7,7 +7,11 @@
  * backend for the exact shapes.
  */
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'wss://interruptible-ai-voice-browser-agent.onrender.com/ws'
+const WS_URL = import.meta.env.VITE_WS_URL || (
+  typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'ws://localhost:8000/ws'
+    : 'wss://interruptible-ai-voice-browser-agent.onrender.com/ws'
+)
 
 export class VoiceSocket {
   constructor() {
