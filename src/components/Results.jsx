@@ -1,14 +1,34 @@
 import React, { useState } from 'react'
 
+const SITE_COLORS = {
+  amazon:   'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/25',
+  snapdeal: 'bg-rose-500/10 text-rose-300 border-rose-500/30 hover:bg-rose-500/25',
+  myntra:   'bg-pink-500/10 text-pink-300 border-pink-500/30 hover:bg-pink-500/25',
+  nykaa:    'bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-500/30 hover:bg-fuchsia-500/25',
+  meesho:   'bg-purple-500/10 text-purple-300 border-purple-500/30 hover:bg-purple-500/25',
+}
+const SITE_COLORS_ACTIVE = {
+  amazon:   'bg-amber-500/30 text-amber-200 border-amber-400/70 ring-1 ring-amber-400/50',
+  snapdeal: 'bg-rose-500/30 text-rose-200 border-rose-400/70 ring-1 ring-rose-400/50',
+  myntra:   'bg-pink-500/30 text-pink-200 border-pink-400/70 ring-1 ring-pink-400/50',
+  nykaa:    'bg-fuchsia-500/30 text-fuchsia-200 border-fuchsia-400/70 ring-1 ring-fuchsia-400/50',
+  meesho:   'bg-purple-500/30 text-purple-200 border-purple-400/70 ring-1 ring-purple-400/50',
+}
+
+function siteKey(s) { return (s || '').toLowerCase() }
+
 export default function Results({
   results,
   emptyMessage,
   onFilterApply,
   onFilterClear,
   activeRange,
+  isFallback,
+  warning,
 }) {
   const [minVal, setMinVal] = useState('')
   const [maxVal, setMaxVal] = useState('')
+  const [selectedStore, setSelectedStore] = useState(null)
 
   function handleApply(e) {
     e?.preventDefault()
@@ -22,7 +42,40 @@ export default function Results({
     onFilterClear?.()
   }
 
-  const sitesFound = Array.from(new Set((results || []).map((r) => r.site).filter(Boolean)))
+  function handleStoreToggle(store) {
+    setSelectedStore((prev) => (prev === store ? null : store))
+  }
+
+  // Assertion guard: only render items with valid name
+  const validResults = (results || []).filter((r) => Boolean(r && r.name && r.name.trim()))
+
+  const isFallbackMode = Boolean(isFallback || validResults.some((r) => r.is_fallback))
+
+  const sitesFound = Array.from(new Set(validResults.map((r) => r.site).filter(Boolean)))
+
+  // Apply store filter on top of valid results
+  const displayResults = selectedStore
+    ? validResults.filter((r) => siteKey(r.site) === siteKey(selectedStore))
+    : validResults
+
+  const fallbackBanner = isFallbackMode && (
+    <div className="mb-4 rounded-xl border border-amber-500/50 bg-amber-500/10 p-3.5 text-amber-200 flex items-start gap-3 shadow-md shadow-amber-500/5 animate-fadeInUp">
+      <span className="text-xl leading-none mt-0.5" role="img" aria-label="warning">⚠️</span>
+      <div className="flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+            Local Fallback Demo Mode
+          </p>
+          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+            Offline Demo Data
+          </span>
+        </div>
+        <p className="text-xs text-amber-200/90 mt-1 leading-relaxed">
+          {warning || "Live browser scraping timed out or encountered anti-bot protection. Displaying local demo catalog items for demonstration purposes."}
+        </p>
+      </div>
+    </div>
+  )
 
   const filterBar = (
     <div className="flex flex-wrap items-center justify-between gap-3 bg-base-900/60 border border-base-800/80 rounded-xl p-3 mb-4 backdrop-blur-sm">
@@ -63,39 +116,46 @@ export default function Results({
           </div>
         </form>
 
-        {/* Multi-Store Comparison Indicator */}
+        {/* Interactive Multi-Store Filter Badges */}
         {sitesFound.length > 0 && (
           <div className="flex items-center gap-1.5 border-l border-base-800/80 pl-3">
             <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
               Stores:
             </span>
-            <div className="flex items-center gap-1">
-              {sitesFound.map((s) => (
-                <span
-                  key={s}
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    s.toLowerCase() === 'amazon'
-                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                      : s.toLowerCase() === 'snapdeal'
-                      ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
-                      : s.toLowerCase() === 'myntra'
-                      ? 'bg-pink-500/10 text-pink-300 border-pink-500/30'
-                      : s.toLowerCase() === 'nykaa'
-                      ? 'bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-500/30'
-                      : s.toLowerCase() === 'meesho'
-                      ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
-                      : 'bg-base-800 text-gray-300 border-base-700'
-                  }`}
+            <div className="flex items-center gap-1 flex-wrap">
+              {sitesFound.map((s) => {
+                const key = siteKey(s)
+                const isActive = selectedStore && siteKey(selectedStore) === key
+                const baseClass = isActive
+                  ? (SITE_COLORS_ACTIVE[key] || 'bg-base-700 text-white border-base-500 ring-1 ring-base-400')
+                  : (SITE_COLORS[key] || 'bg-base-800 text-gray-300 border-base-700 hover:bg-base-700')
+                return (
+                  <button
+                    key={s}
+                    onClick={() => handleStoreToggle(s)}
+                    title={isActive ? `Clear ${s} filter` : `Show only ${s}`}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all cursor-pointer ${baseClass}`}
+                  >
+                    {isActive && <span className="mr-0.5">✓</span>}
+                    {s}
+                  </button>
+                )
+              })}
+              {selectedStore && (
+                <button
+                  onClick={() => setSelectedStore(null)}
+                  title="Show all stores"
+                  className="text-[10px] font-medium px-2 py-0.5 rounded-full border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-all cursor-pointer"
                 >
-                  {s}
-                </span>
-              ))}
+                  All
+                </button>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {/* Active Filter Chip */}
+      {/* Active Price Filter Chip */}
       {activeRange && (activeRange.min != null || activeRange.max != null) && (
         <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full text-xs font-medium">
           <span>
@@ -114,9 +174,10 @@ export default function Results({
     </div>
   )
 
-  if (!results || results.length === 0) {
+  if (validResults.length === 0) {
     return (
       <div>
+        {fallbackBanner}
         {activeRange && filterBar}
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-base-800 bg-base-900/30 px-4 py-12 text-center">
           <svg
@@ -133,7 +194,7 @@ export default function Results({
             <line x1="12" y1="22.08" x2="12" y2="12" />
           </svg>
           <p className="text-sm text-gray-500 max-w-sm">
-            {emptyMessage || 'Results will appear here once the browser finishes searching.'}
+            {warning || emptyMessage || 'Results will appear here once the browser finishes searching.'}
           </p>
         </div>
       </div>
@@ -142,15 +203,30 @@ export default function Results({
 
   return (
     <div>
+      {fallbackBanner}
       {filterBar}
+
+      {/* Store filter active notice */}
+      {selectedStore && (
+        <div className="flex items-center gap-2 mb-3 px-1">
+          <span className="text-xs text-gray-400">
+            Showing <span className="font-semibold text-gray-200">{displayResults.length}</span> result{displayResults.length !== 1 ? 's' : ''} from <span className="font-semibold text-gray-200">{selectedStore}</span>
+          </span>
+          <button onClick={() => setSelectedStore(null)} className="text-[11px] text-gray-500 hover:text-gray-300 underline cursor-pointer transition-colors">
+            show all
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {results.map((item, i) => {
+        {displayResults.map((item, i) => {
           const hasUrl = Boolean(item.url)
-          const isTopPick = i === 0
+          const isTopPick = !selectedStore && i === 0
+          const isItemFallback = Boolean(item.is_fallback || isFallbackMode)
 
           const cardContent = (
             <>
-              {/* Image Container with Aspect Ratio & Framing */}
+              {/* Image */}
               <div className="relative aspect-[4/3] bg-base-950/80 flex items-center justify-center overflow-hidden border-b border-base-800/80">
                 {item.image ? (
                   <img
@@ -170,21 +246,28 @@ export default function Results({
                   </div>
                 )}
 
-                {/* Badge Stack (Top Left) */}
+                {/* Badge Stack */}
                 <div className="absolute top-2.5 left-2.5 flex flex-col items-start gap-1 z-10">
-                  {/* Store Badge */}
+                  {/* Fallback label if item comes from offline catalog */}
+                  {isItemFallback && (
+                    <div className="flex items-center gap-1 rounded bg-amber-500/90 text-base-950 px-2 py-0.5 text-[9px] font-extrabold shadow-md uppercase tracking-wider">
+                      <span>⚠️ Demo Catalog</span>
+                    </div>
+                  )}
+
+                  {/* Store badge */}
                   {item.site && (
                     <div
                       className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold shadow-md uppercase tracking-wider ${
-                        item.site.toLowerCase() === 'amazon'
+                        siteKey(item.site) === 'amazon'
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 backdrop-blur'
-                          : item.site.toLowerCase() === 'snapdeal'
+                          : siteKey(item.site) === 'snapdeal'
                           ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 backdrop-blur'
-                          : item.site.toLowerCase() === 'myntra'
+                          : siteKey(item.site) === 'myntra'
                           ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40 backdrop-blur'
-                          : item.site.toLowerCase() === 'nykaa'
+                          : siteKey(item.site) === 'nykaa'
                           ? 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 backdrop-blur'
-                          : item.site.toLowerCase() === 'meesho'
+                          : siteKey(item.site) === 'meesho'
                           ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 backdrop-blur'
                           : 'bg-base-800 text-gray-300 border border-base-700'
                       }`}
@@ -192,7 +275,6 @@ export default function Results({
                       {item.site}
                     </div>
                   )}
-
                   {isTopPick && (
                     <div className="flex items-center gap-1 rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-base-950 shadow-md">
                       <svg className="h-3 w-3 fill-current" viewBox="0 0 24 24">
@@ -208,7 +290,7 @@ export default function Results({
                   )}
                 </div>
 
-                {/* External Link Indicator */}
+                {/* External link indicator */}
                 {hasUrl && (
                   <div className="absolute top-2.5 right-2.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 rounded-md bg-base-900/80 p-1 text-gray-300 backdrop-blur z-10">
                     <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -220,14 +302,12 @@ export default function Results({
                 )}
               </div>
 
-              {/* Content Details */}
+              {/* Content */}
               <div className="p-3.5 flex flex-col justify-between flex-1">
                 <div>
                   <p className="text-sm font-medium text-gray-200 line-clamp-2 leading-snug group-hover:text-amber-300 transition-colors">
                     {item.name}
                   </p>
-
-                  {/* Rating and Review Count */}
                   {item.rating ? (
                     <div className="flex items-center gap-1.5 mt-2">
                       <span className="inline-flex items-center gap-1 rounded bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300">

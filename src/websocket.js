@@ -79,8 +79,10 @@ export class VoiceSocket {
     }
   }
 
-  sendUtterance(text) {
-    this.send({ action: 'utterance', text })
+  sendUtterance(text, lang) {
+    const payload = { action: 'utterance', text }
+    if (lang) payload.lang = lang
+    this.send(payload)
   }
 
   close() {

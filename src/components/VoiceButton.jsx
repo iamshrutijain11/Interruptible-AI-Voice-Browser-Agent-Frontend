@@ -1,9 +1,25 @@
 import React, { useRef, useState } from 'react'
 import { sendAudioCommand } from '../api'
 
+// All 9 languages supported by Rime's Coda TTS model.
+// Each entry: [ISO-639-1, BCP-47 for Web Speech API, display label, flag]
+const SUPPORTED_LANGUAGES = [
+  { code: 'en', bcp47: 'en-IN', label: 'English',    flag: '🇮🇳' },
+  { code: 'hi', bcp47: 'hi-IN', label: 'हिंदी',     flag: '🇮🇳' },
+  { code: 'es', bcp47: 'es-ES', label: 'Español',    flag: '🇪🇸' },
+  { code: 'fr', bcp47: 'fr-FR', label: 'Français',   flag: '🇫🇷' },
+  { code: 'de', bcp47: 'de-DE', label: 'Deutsch',    flag: '🇩🇪' },
+  { code: 'it', bcp47: 'it-IT', label: 'Italiano',   flag: '🇮🇹' },
+  { code: 'pt', bcp47: 'pt-BR', label: 'Português',  flag: '🇧🇷' },
+  { code: 'ar', bcp47: 'ar-SA', label: 'العربية',    flag: '🇸🇦' },
+  { code: 'ja', bcp47: 'ja-JP', label: '日本語',     flag: '🇯🇵' },
+]
+
 export default function VoiceButton({ onRecordingStart, onRecordingSent, onError, onSpeechText }) {
   const [recording, setRecording] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [selectedLang, setSelectedLang] = useState(SUPPORTED_LANGUAGES[0])
+  const [langOpen, setLangOpen] = useState(false)
   const recognitionRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
@@ -17,7 +33,8 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
     const cleanText = (text || transcriptRef.current || '').trim()
     stopRecording()
     if (cleanText) {
-      onSpeechText?.(cleanText)
+      // Pass both text AND the ISO language code so the backend gets the hint
+      onSpeechText?.(cleanText, selectedLang.code)
       transcriptRef.current = ''
       setLiveTranscript('')
     }
@@ -27,6 +44,7 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
     setLiveTranscript('')
     transcriptRef.current = ''
     clearTimeout(silenceTimerRef.current)
+    setLangOpen(false)
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
@@ -35,8 +53,8 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
         const recognition = new SpeechRecognition()
         recognition.continuous = true
         recognition.interimResults = true
-        // Default to user locale, with English fallback
-        recognition.lang = navigator.language || 'en-IN'
+        // Use the user-selected BCP-47 language tag
+        recognition.lang = selectedLang.bcp47
 
         recognition.onstart = () => {
           setRecording(true)
@@ -61,7 +79,7 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
             transcriptRef.current = (final || current).trim()
             setLiveTranscript(current)
 
-            // Auto-send if user pauses speaking for 1.4 seconds
+            // Auto-send if user pauses for 1.4 seconds
             clearTimeout(silenceTimerRef.current)
             silenceTimerRef.current = setTimeout(() => {
               finishAndSend(transcriptRef.current || current)
@@ -72,7 +90,6 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
         recognition.onerror = (event) => {
           console.warn('SpeechRecognition error:', event.error)
           if (event.error === 'no-speech') {
-            // Keep listening, don't abort abruptly
             return
           }
           if (event.error === 'not-allowed') {
@@ -80,12 +97,11 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
             setRecording(false)
             return
           }
-          // On network or platform error, fall back to MediaRecorder
+          // Fall back to MediaRecorder on network/platform error
           fallbackMediaRecorder()
         }
 
         recognition.onend = () => {
-          // If we have accumulated speech, send it
           if (transcriptRef.current) {
             finishAndSend(transcriptRef.current)
           } else {
@@ -122,7 +138,7 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
           const result = await sendAudioCommand(blob)
           onRecordingSent?.(result)
           if (result?.transcript) {
-            onSpeechText?.(result.transcript)
+            onSpeechText?.(result.transcript, selectedLang.code)
           }
         } catch (err) {
           onError?.(err.message)
@@ -143,14 +159,10 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
   function stopRecording() {
     clearTimeout(silenceTimerRef.current)
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop()
-      } catch (e) {}
+      try { recognitionRef.current.stop() } catch (e) {}
     }
     if (mediaRecorderRef.current) {
-      try {
-        mediaRecorderRef.current.stop()
-      } catch (e) {}
+      try { mediaRecorderRef.current.stop() } catch (e) {}
     }
     setRecording(false)
   }
@@ -164,10 +176,16 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
     }
   }
 
+  function handleLangSelect(lang) {
+    setSelectedLang(lang)
+    setLangOpen(false)
+    // If currently recording, stop so user can restart with new language
+    if (recording) stopRecording()
+  }
 
   return (
     <div className="relative flex flex-col items-center gap-4 py-2">
-      {/* Ambient background glow at rest and expanded during recording */}
+      {/* Ambient background glow */}
       <div
         className={`pointer-events-none absolute h-36 w-36 rounded-full transition-all duration-700 ease-out ${
           recording
@@ -179,7 +197,7 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
       />
 
       <div className="relative flex items-center justify-center">
-        {/* Active Audio Waveform Staggered Rings (Recording state) */}
+        {/* Active Waveform Rings */}
         {recording && (
           <>
             <span className="pointer-events-none absolute h-32 w-32 rounded-full border border-amber-400/40 animate-ripple" />
@@ -190,7 +208,7 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
           </>
         )}
 
-        {/* Processing Spinner Ring (Busy state) */}
+        {/* Busy spinner */}
         {busy && (
           <span className="pointer-events-none absolute h-28 w-28 rounded-full border-2 border-dashed border-teal-400/60 animate-spin" />
         )}
@@ -234,6 +252,58 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
         </span>
       </div>
 
+      {/* ── Language Selector ── */}
+      <div className="relative">
+        <button
+          onClick={() => setLangOpen((o) => !o)}
+          disabled={recording || busy}
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all ${
+            recording || busy
+              ? 'border-base-800 text-gray-600 cursor-not-allowed opacity-60'
+              : 'border-base-700 bg-base-900/70 text-gray-300 hover:border-amber-500/50 hover:text-amber-300 cursor-pointer'
+          }`}
+          title="Select voice language"
+        >
+          <span className="text-base leading-none">{selectedLang.flag}</span>
+          <span>{selectedLang.label}</span>
+          <svg className="h-3 w-3 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+
+        {langOpen && (
+          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50
+            w-44 rounded-xl border border-base-700 bg-base-900 shadow-2xl shadow-black/60
+            backdrop-blur-md overflow-hidden animate-fadeInUp">
+            <div className="px-2 py-1.5 border-b border-base-800">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                Voice language
+              </p>
+            </div>
+            <div className="py-1 max-h-64 overflow-y-auto">
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <button
+                  key={lang.code}
+                  onClick={() => handleLangSelect(lang)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors text-left cursor-pointer ${
+                    selectedLang.code === lang.code
+                      ? 'bg-amber-500/15 text-amber-300'
+                      : 'text-gray-300 hover:bg-base-800 hover:text-white'
+                  }`}
+                >
+                  <span className="text-base leading-none">{lang.flag}</span>
+                  <span className="font-medium">{lang.label}</span>
+                  {selectedLang.code === lang.code && (
+                    <svg className="ml-auto h-3 w-3 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

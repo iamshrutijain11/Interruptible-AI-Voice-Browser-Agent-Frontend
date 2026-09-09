@@ -29,8 +29,9 @@ export default function App() {
   // Recommendation state
   const [recommendation, setRecommendation]     = useState(null)
   const [awaitingApproval, setAwaitingApproval] = useState(false)
-  // Metrics & activity panel state
   const [metrics, setMetrics]                   = useState(null)
+  const [isFallback, setIsFallback]             = useState(false)
+  const [searchWarning, setSearchWarning]       = useState(null)
 
   const socketRef = useRef(null)
 
@@ -58,6 +59,8 @@ export default function App() {
       setAwaitingApproval(false)
       setErrorMsg(null)
       setJustInterrupted(false)
+      setIsFallback(false)
+      setSearchWarning(null)
       if (ev.constraints && (ev.constraints.min_price != null || ev.constraints.max_price != null)) {
         setActiveRange({ min: ev.constraints.min_price, max: ev.constraints.max_price })
       } else {
@@ -109,7 +112,9 @@ export default function App() {
     socket.on('state.changed', (ev) => setState(ev.state))
 
     socket.on('browser.result', (ev) => {
-      setResults(ev.results)
+      setResults(ev.results || [])
+      setIsFallback(Boolean(ev.is_fallback))
+      setSearchWarning(ev.warning || null)
       setTimeline((t) => [...t, ev])
     })
 
@@ -118,6 +123,20 @@ export default function App() {
       if ('speechSynthesis' in window && ev.text) {
         window.speechSynthesis.cancel()
         const utterance = new SpeechSynthesisUtterance(ev.text)
+        if (ev.language) {
+          const langMap = {
+            hi: 'hi-IN',
+            es: 'es-ES',
+            fr: 'fr-FR',
+            de: 'de-DE',
+            it: 'it-IT',
+            pt: 'pt-BR',
+            ar: 'ar-SA',
+            ja: 'ja-JP',
+            en: 'en-IN',
+          }
+          utterance.lang = langMap[ev.language] || ev.language
+        }
         utterance.rate = 1.0
         window.speechSynthesis.speak(utterance)
       }
@@ -152,6 +171,8 @@ export default function App() {
     setActiveRange(null)
     setDetectedLanguage('')
     setMetrics(null)
+    setIsFallback(false)
+    setSearchWarning(null)
   }
 
   function handleFilterApply(min, max) {
@@ -170,7 +191,7 @@ export default function App() {
   function handleTypedSubmit(e) {
     e.preventDefault()
     if (!typedText.trim()) return
-    socketRef.current?.sendUtterance(typedText.trim())
+    socketRef.current?.sendUtterance(typedText.trim(), detectedLanguage || 'und')
     setTypedText('')
   }
 
@@ -234,10 +255,10 @@ export default function App() {
                 <VoiceButton
                   onRecordingStart={() => setState('LISTENING')}
                   onRecordingSent={(res) => { if (res?.transcript) setUserText(res.transcript) }}
-                  onSpeechText={(text) => {
+                  onSpeechText={(text, lang) => {
                     if (text?.trim()) {
                       setUserText(text.trim())
-                      socketRef.current?.sendUtterance(text.trim())
+                      socketRef.current?.sendUtterance(text.trim(), lang)
                     }
                   }}
                   onError={(msg) => setErrorMsg(msg)}
@@ -308,6 +329,8 @@ export default function App() {
               <Results
                 results={results}
                 activeRange={activeRange}
+                isFallback={isFallback}
+                warning={searchWarning}
                 onFilterApply={handleFilterApply}
                 onFilterClear={handleFilterClear}
               />
