@@ -155,7 +155,12 @@ export default function App() {
 
   async function handleReset() {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel()
-    await resetTask()
+    socketRef.current?.send({ action: 'reset' })
+    try {
+      await resetTask()
+    } catch (e) {
+      console.warn('REST reset failed:', e)
+    }
     setState('IDLE')
     setTaskId(null)
     setUserText('')
@@ -185,7 +190,7 @@ export default function App() {
 
   function handleFilterClear() {
     setActiveRange(null)
-    socketRef.current?.sendUtterance('under 1000000')
+    socketRef.current?.sendUtterance('any price')
   }
 
   function handleTypedSubmit(e) {

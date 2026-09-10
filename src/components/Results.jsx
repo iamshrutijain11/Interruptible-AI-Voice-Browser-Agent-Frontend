@@ -229,12 +229,32 @@ export default function Results({
               {/* Image */}
               <div className="relative aspect-[4/3] bg-base-950/80 flex items-center justify-center overflow-hidden border-b border-base-800/80">
                 {item.image ? (
-                  <img
-                    src={item.image}
-                    alt={item.name}
-                    className="h-full w-full object-contain p-3 transition-transform duration-300 ease-out group-hover:scale-105"
-                    loading="lazy"
-                  />
+                  <>
+                    <img
+                      src={item.image}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                        if (e.currentTarget.nextElementSibling) {
+                          e.currentTarget.nextElementSibling.style.display = 'flex'
+                        }
+                      }}
+                      className="h-full w-full object-contain p-3 transition-transform duration-300 ease-out group-hover:scale-105"
+                      loading="lazy"
+                    />
+                    <div
+                      style={{ display: 'none' }}
+                      className="flex flex-col items-center justify-center text-gray-600 gap-1.5 p-4 text-center"
+                    >
+                      <svg className="h-7 w-7 text-base-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                      </svg>
+                      <span className="text-[10px] text-gray-500 font-medium">Image unavailable</span>
+                    </div>
+                  </>
                 ) : (
                   <div className="flex flex-col items-center justify-center text-gray-600 gap-1">
                     <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -246,16 +266,8 @@ export default function Results({
                   </div>
                 )}
 
-                {/* Badge Stack */}
-                <div className="absolute top-2.5 left-2.5 flex flex-col items-start gap-1 z-10">
-                  {/* Fallback label if item comes from offline catalog */}
-                  {isItemFallback && (
-                    <div className="flex items-center gap-1 rounded bg-amber-500/90 text-base-950 px-2 py-0.5 text-[9px] font-extrabold shadow-md uppercase tracking-wider">
-                      <span>⚠️ Demo Catalog</span>
-                    </div>
-                  )}
-
-                  {/* Store badge */}
+                {/* Top-Left Badges: Store + Top Pick + Bestseller */}
+                <div className="absolute top-2.5 left-2.5 flex flex-wrap items-center gap-1.5 z-10 max-w-[70%]">
                   {item.site && (
                     <div
                       className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold shadow-md uppercase tracking-wider ${
@@ -289,6 +301,15 @@ export default function Results({
                     </div>
                   )}
                 </div>
+
+                {/* Top-Right Badge: Demo Catalog indicator */}
+                {isItemFallback && (
+                  <div className="absolute top-2.5 right-2.5 z-10">
+                    <span className="rounded bg-amber-500/90 text-base-950 px-2 py-0.5 text-[9px] font-extrabold shadow-md uppercase tracking-wider">
+                      Demo
+                    </span>
+                  </div>
+                )}
 
                 {/* External link indicator */}
                 {hasUrl && (

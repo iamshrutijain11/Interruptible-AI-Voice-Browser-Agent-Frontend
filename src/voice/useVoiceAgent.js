@@ -24,6 +24,55 @@ function b64toBlob(b64Data, contentType = 'audio/wav') {
     console.error('[b64toBlob] Conversion failed:', e);
     return null;
   }
+function parseSpeechRecognitionResults(results) {
+  if (!results || results.length === 0) return { final: '', current: '' };
+  const finalSegments = [];
+  let interim = '';
+
+  for (let i = 0; i < results.length; ++i) {
+    const res = results[i];
+    if (!res || !res[0]) continue;
+    const text = (res[0].transcript || '').trim();
+    if (!text) continue;
+
+    if (res.isFinal) {
+      if (finalSegments.length > 0) {
+        const prev = finalSegments[finalSegments.length - 1].trim().toLowerCase();
+        const curr = text.toLowerCase();
+        if (curr === prev) continue;
+        if (curr.startsWith(prev)) {
+          finalSegments[finalSegments.length - 1] = text;
+        } else if (prev.startsWith(curr)) {
+          continue;
+        } else {
+          finalSegments.push(text);
+        }
+      } else {
+        finalSegments.push(text);
+      }
+    } else {
+      interim = text;
+    }
+  }
+
+  const finalStr = finalSegments.join(' ').trim();
+  let currentStr = finalStr;
+
+  if (interim) {
+    const normFinal = finalStr.toLowerCase();
+    const normInterim = interim.toLowerCase();
+    if (!normFinal) {
+      currentStr = interim;
+    } else if (normInterim.startsWith(normFinal)) {
+      currentStr = interim;
+    } else if (normFinal.startsWith(normInterim)) {
+      currentStr = finalStr;
+    } else {
+      currentStr = `${finalStr} ${interim}`.trim();
+    }
+  }
+
+  return { final: finalStr, current: currentStr };
 }
 
 /**
@@ -250,16 +299,14 @@ export function useVoiceAgent(options = {}) {
       if (SpeechRecognitionClass) {
         try {
           const recognition = new SpeechRecognitionClass();
-          recognition.continuous = true;
+          const isMobile = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '');
+          recognition.continuous = !isMobile;
           recognition.interimResults = true;
           recognition.lang = 'en-IN'; // Robust for English, accents & mixed speech
 
           recognition.onresult = (event) => {
-            let fullText = '';
-            for (let i = 0; i < event.results.length; ++i) {
-              fullText += event.results[i][0].transcript;
-            }
-            const cleanText = fullText.trim();
+            const { final, current } = parseSpeechRecognitionResults(event.results);
+            const cleanText = (final || current || '').trim();
             if (cleanText) {
               accumulatedTranscriptRef.current = cleanText;
               setTranscription(cleanText);

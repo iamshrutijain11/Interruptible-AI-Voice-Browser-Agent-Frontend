@@ -15,6 +15,80 @@ const SUPPORTED_LANGUAGES = [
   { code: 'ja', bcp47: 'ja-JP', label: '日本語',     flag: '🇯🇵' },
 ]
 
+// Detect mobile devices to adapt SpeechRecognition behavior
+const isMobileBrowser = () => {
+  if (typeof navigator === 'undefined') return false
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '')
+}
+
+/**
+ * Safely parses Web Speech API SpeechRecognitionResultList across Desktop and Mobile.
+ * Prevents mobile Chrome cumulative word duplication stutter (e.g. "fine fine black fine black running...").
+ */
+function parseSpeechRecognitionResults(results) {
+  if (!results || results.length === 0) {
+    return { final: '', current: '' }
+  }
+
+  const finalSegments = []
+  let interim = ''
+
+  for (let i = 0; i < results.length; ++i) {
+    const res = results[i]
+    if (!res || !res[0]) continue
+    const text = (res[0].transcript || '').trim()
+    if (!text) continue
+
+    if (res.isFinal) {
+      if (finalSegments.length > 0) {
+        const prev = finalSegments[finalSegments.length - 1].trim().toLowerCase()
+        const curr = text.toLowerCase()
+
+        if (curr === prev) {
+          // Exact duplicate segment emitted by mobile Web Speech API, skip
+          continue
+        } else if (curr.startsWith(prev)) {
+          // Cumulative segment (Android Chrome sends previous segment + new words)
+          finalSegments[finalSegments.length - 1] = text
+        } else if (prev.startsWith(curr)) {
+          // Shorter prefix of an already recorded segment, skip
+          continue
+        } else {
+          // Distinct segment (desktop continuous speech)
+          finalSegments.push(text)
+        }
+      } else {
+        finalSegments.push(text)
+      }
+    } else {
+      interim = text
+    }
+  }
+
+  const finalStr = finalSegments.join(' ').trim()
+  let currentStr = finalStr
+
+  if (interim) {
+    const normFinal = finalStr.toLowerCase()
+    const normInterim = interim.toLowerCase()
+
+    if (!normFinal) {
+      currentStr = interim
+    } else if (normInterim.startsWith(normFinal)) {
+      currentStr = interim
+    } else if (normFinal.startsWith(normInterim)) {
+      currentStr = finalStr
+    } else {
+      currentStr = `${finalStr} ${interim}`.trim()
+    }
+  }
+
+  return {
+    final: finalStr,
+    current: currentStr
+  }
+}
+
 export default function VoiceButton({ onRecordingStart, onRecordingSent, onError, onSpeechText }) {
   const [recording, setRecording] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -27,20 +101,28 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
   const [liveTranscript, setLiveTranscript] = useState('')
   const transcriptRef = useRef('')
   const silenceTimerRef = useRef(null)
+  const isSendingRef = useRef(false)
 
   function finishAndSend(text) {
+    if (isSendingRef.current) return
     clearTimeout(silenceTimerRef.current)
     const cleanText = (text || transcriptRef.current || '').trim()
+    transcriptRef.current = ''
+    setLiveTranscript('')
     stopRecording()
+
     if (cleanText) {
+      isSendingRef.current = true
       // Pass both text AND the ISO language code so the backend gets the hint
       onSpeechText?.(cleanText, selectedLang.code)
-      transcriptRef.current = ''
-      setLiveTranscript('')
+      setTimeout(() => {
+        isSendingRef.current = false
+      }, 500)
     }
   }
 
   function startRecording() {
+    isSendingRef.current = false
     setLiveTranscript('')
     transcriptRef.current = ''
     clearTimeout(silenceTimerRef.current)
@@ -51,7 +133,9 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
     if (SpeechRecognition) {
       try {
         const recognition = new SpeechRecognition()
-        recognition.continuous = true
+        const mobile = isMobileBrowser()
+        // Mobile Chrome has severe duplication bugs with continuous=true; single-utterance is stable
+        recognition.continuous = !mobile
         recognition.interimResults = true
         // Use the user-selected BCP-47 language tag
         recognition.lang = selectedLang.bcp47
@@ -62,28 +146,18 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
         }
 
         recognition.onresult = (event) => {
-          let interim = ''
-          let final = ''
+          const { final, current } = parseSpeechRecognitionResults(event.results)
+          const textToUse = (final || current).trim()
 
-          for (let i = 0; i < event.results.length; ++i) {
-            const res = event.results[i]
-            if (res.isFinal) {
-              final += res[0].transcript + ' '
-            } else {
-              interim += res[0].transcript
-            }
-          }
+          if (textToUse) {
+            transcriptRef.current = textToUse
+            setLiveTranscript(current || final)
 
-          const current = (final + interim).trim()
-          if (current) {
-            transcriptRef.current = (final || current).trim()
-            setLiveTranscript(current)
-
-            // Auto-send if user pauses for 1.4 seconds
+            // Auto-send if user pauses
             clearTimeout(silenceTimerRef.current)
             silenceTimerRef.current = setTimeout(() => {
-              finishAndSend(transcriptRef.current || current)
-            }, 1400)
+              finishAndSend(transcriptRef.current || textToUse)
+            }, mobile ? 1200 : 1400)
           }
         }
 
@@ -102,7 +176,7 @@ export default function VoiceButton({ onRecordingStart, onRecordingSent, onError
         }
 
         recognition.onend = () => {
-          if (transcriptRef.current) {
+          if (transcriptRef.current && !isSendingRef.current) {
             finishAndSend(transcriptRef.current)
           } else {
             setRecording(false)
